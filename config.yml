@@ -1,6 +1,6 @@
 ## Basic configuration optimized for personal use case
 #### API-INFO
-api_title : Youtube-Downloader-API
+api_title : YT-Shorts-Scraper
 # API title
 
 api_description : docs/DESCRIPTION.md
@@ -38,7 +38,7 @@ cookiefile :
 # Path to Youtube's cookie file formatted in netscape.
 
 proxy :
-# htttps proxy such as 127.0.0.1:7071 or socks5://127.0.0.1:5000
+# https proxy such as 127.0.0.1:7071 or socks5://127.0.0.1:5000
 
 filename_prefix :
 # text to be appended to every downloadable filename
@@ -81,7 +81,7 @@ serve_frontend_from_static_server: false
 # NOTE: This disables serving forntend-contents from the API server
 
 api_base_url :
-# To be used for running the proxy script - url pointing to the API
+# To be used for running the proxy script - url pointing to the server
 # e.g http://localhost:8000
 
 ####    DOWNLOAD OPTIONS ####

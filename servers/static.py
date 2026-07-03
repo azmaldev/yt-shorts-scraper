@@ -5,7 +5,6 @@ The sole purpose of this is to reduce the work-load on youtube-downloader API.
 Allows the API to only serve the dynamic contents as it focuses on static ones.
 """
 
-from os import getcwd
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -20,11 +19,7 @@ from app.config import DOWNLOAD_DIR, loaded_config
 
 app = Flask(__name__)
 static_app = app
-ref_directory = (
-    DOWNLOAD_DIR
-    if DOWNLOAD_DIR.is_absolute()
-    else Path(getcwd()).joinpath(DOWNLOAD_DIR)
-)
+ref_directory = DOWNLOAD_DIR
 
 
 if loaded_config.serve_frontend_from_static_server and loaded_config.frontend_dir:

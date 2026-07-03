@@ -1,348 +1,111 @@
-import asyncio
-import json
-import typing as t
-from functools import lru_cache
-from os import path
+import os
+import tempfile
 from pathlib import Path
 
-from fastapi import (
-    APIRouter,
-    Header,
-    HTTPException,
-    Query,
-    Request,
-    WebSocket,
-    status,
-)
-from httpx import Proxy
-from innertube import InnerTube
-from pydantic import ValidationError
-from starlette.websockets import WebSocketState
+import shutil
+
+from fastapi import APIRouter, HTTPException, Query, status
+from starlette.background import BackgroundTask
+from fastapi.responses import FileResponse
 from yt_dlp_bonus import Downloader, YoutubeDLBonus
-from yt_dlp_bonus.constants import audioQualities, videoQualities
-from yt_dlp_bonus.utils import get_size_string
+from yt_dlp_bonus.constants import audioQualities
 
-import app.v1.models as models
-from app.config import DOWNLOAD_DIR, TEMP_DIR, loaded_config
-from app.models import CustomWebsocketResponse
-from app.utils import (
-    get_absolute_link_to_static_file,
-    logger,
-    router_exception_handler,
-    sanitize_filename,
-    silence_websocket_exceptions,
-)
-from app.v1.download_manager import download_manager  # ← only new import
-from app.v1.utils import get_extracted_info
+from app.config import loaded_config
+from app.utils import get_video_id, router_exception_handler, sanitize_filename
+from app.v1.models import MetadataResponse
+from app.v1.utils import extract_hashtags, extract_transcript, get_extracted_info
 
-router = APIRouter(prefix="/v1")
+router = APIRouter()
 
-yt_params = loaded_config.ytdlp_params
-
-yt_params.update({
-    "paths": {"home": DOWNLOAD_DIR.as_posix(), "temp": TEMP_DIR.name}
-})
-
-yt = YoutubeDLBonus(params=yt_params)
+yt = YoutubeDLBonus(params=loaded_config.ytdlp_params)
 
 downloader = Downloader(
     yt=yt,
-    working_directory=DOWNLOAD_DIR,
-    clear_temps=loaded_config.clear_temps,
-    filename_prefix=loaded_config.filename_prefix,
+    working_directory=Path(tempfile.gettempdir()),
+    clear_temps=True,
 )
 
 
-PARAMS_TYPE_VIDEO = "EgIQAQ%3D%3D"
-
-innertube_client = InnerTube(
-    "WEB",
-    "2.20230920.00.00",
-    # proxies=None if not loaded_config.proxy else Proxy(loaded_config.proxy),
-)
-
-
-@lru_cache(maxsize=100)
-def search_videos_by_key(query: str, limit: int = -1) -> list[dict[str, str]]:
-    """Perform a video search.
-
-    Args:
-        query (str): Search keyword
-        limit (int): Total results not to exceed. Defaults to -1 (No limit).
-
-    Returns:
-        list[dict[str, str]]: Sorted shallow results.
-    """
-    video_search_results = innertube_client.search(
-        query, params=PARAMS_TYPE_VIDEO
-    )
-    video_metadata_container: list[dict] = []
-    contents = video_search_results["contents"]["twoColumnSearchResultsRenderer"][
-        "primaryContents"
-    ]["sectionListRenderer"]["contents"][0]["itemSectionRenderer"]["contents"]
-    count = 0
-    for content in contents:
-        try:
-            video = content["videoRenderer"]
-            video_id = video["videoId"]
-            video_title = video["title"]["runs"][0]["text"]
-            video_duration = video["lengthText"]["simpleText"]
-            video_metadata_container.append(
-                dict(id=video_id, title=video_title, duration=video_duration)
-            )
-            count += 1
-            if count == limit:
-                break
-
-        except Exception:  # KeyError etc
-            pass
-    return video_metadata_container
-
-
-@router.get("/search", name="Search videos")
-@router_exception_handler
-def search_videos(
-    q: str = Query(description="Video title or keyword"),
-    limit: int = Query(
-        10,
-        gt=0,
-        le=loaded_config.search_limit,
-        description="Videos amount not to exceed.",
-    ),
-) -> models.SearchVideosResponse:
-    """Search videos
-    - Search videos matching the query and return whole results at once.
-    - Serves from cache similar `99` subsequent queries.
-    """
-    videos_found = search_videos_by_key(query=q, limit=limit)
-    if not videos_found:
+def is_short_or_raise(extracted_info) -> None:
+    duration = extracted_info.duration or 0
+    if duration > 120:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No video matched that query - {q}!",
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Video is {duration}s long — only videos ≤120s (Shorts) are "
+                "accepted."
+            ),
         )
-    return models.SearchVideosResponse(query=q, results=videos_found)
 
 
 @router.get("/metadata", name="Video metadata")
 @router_exception_handler
 def get_video_metadata(
-    url: str = Query(description="Video URL or ID"),
-) -> models.VideoMetadataResponse:
-    """Get metadata of a specific video.
-    - Similar subsequent requests will be faster as they will be served
-    from the cache for a few hours.
-    """
+    url: str = Query(description="YouTube video URL or ID"),
+) -> MetadataResponse:
     extracted_info = get_extracted_info(yt=yt, url=url)
-    video_formats = yt.get_video_qualities_with_extension(
-        extracted_info,
-        ext=loaded_config.default_extension,
-        audio_ext=loaded_config.default_audio_format,
-    )
-    updated_video_formats = yt.update_audio_video_size(video_formats)
-    audio_formats = []
-    video_formats = []
-    for quality, format in updated_video_formats.items():
-        if quality in audioQualities:
-            audio_formats.append(
-                dict(
-                    quality=quality,
-                    size=get_size_string(format.audio_video_size),
-                )
-            )
-        else:
-            video_formats.append(
-                dict(
-                    quality=quality,
-                    size=get_size_string(format.audio_video_size),
-                )
-            )
+    is_short_or_raise(extracted_info)
 
-    return models.VideoMetadataResponse(
+    video_id = get_video_id(url)
+    hashtags = extract_hashtags(extracted_info)
+    transcript = extract_transcript(video_id)
+
+    return MetadataResponse(
         id=extracted_info.id,
         title=extracted_info.title,
         channel=extracted_info.channel,
-        uploader_url=extracted_info.uploader_url,
         duration_string=extracted_info.duration_string,
         thumbnail=extracted_info.thumbnail,
-        audio=audio_formats or [{"quality": "bestaudio"}],
-        video=video_formats or [{"quality": "best"}],
-        format=dict(
-            audio=loaded_config.default_audio_format,
-            video="mp4",
-        ),
-        others=dict(
-            like_count=extracted_info.like_count,
-            views_count=extracted_info.view_count,
-            categories=extracted_info.categories or [],
-            tags=extracted_info.tags or [],
-        ),
+        like_count=extracted_info.like_count,
+        views_count=extracted_info.view_count,
+        hashtags=hashtags,
+        transcript=transcript,
     )
 
 
-@router.post("/download", name="Process download")
-def process_video_for_download(
-    request: Request,
-    payload: models.MediaDownloadProcessPayload,
-    x_lang: t.Annotated[
-        str,
-        Header(
-            description="Two-letter ISO set language code for subtitle purposes."
-        ),
-    ] = None,
-) -> models.MediaDownloadResponse:
-    """Initiate download processing
-    - To download the media file: Add parameter `download` with value
-    `true` to the returned link i.e `?download=true`.
-    - Accomplish the same using websocket endpoint at `/api/v1/download/ws`
-    """
-    payload.x_lang = x_lang or payload.x_lang
-    return real_download_process(request, payload)
-
-
+@router.post("/download", name="Extract audio (temp)")
 @router_exception_handler
-def real_download_process(
-    request: Request | WebSocket,
-    payload: models.MediaDownloadProcessPayload,
-    progress_hooks: list[t.Callable] = [],
-    **kwargs,
-) -> models.MediaDownloadResponse:
-    extracted_info = get_extracted_info(yt=yt, url=payload.url)
-    video_formats = yt.get_video_qualities_with_extension(
+def download_audio_temp(
+    url: str = Query(description="YouTube video URL or ID"),
+    quality: str = Query("low", description="Audio quality"),
+):
+    extracted_info = get_extracted_info(yt=yt, url=url)
+    is_short_or_raise(extracted_info)
+
+    target_format = None
+    if quality in audioQualities:
+        video_formats = yt.get_video_qualities_with_extension(
+            extracted_info,
+            ext=loaded_config.default_extension,
+            audio_ext=loaded_config.default_audio_format,
+        )
+        target_format = video_formats.get(quality)
+        if not target_format:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Audio quality '{quality}' not available.",
+            )
+
+    tmpdir = tempfile.mkdtemp()
+    processed = downloader.ydl_run_audio(
         extracted_info,
-        ext=loaded_config.default_extension,
-        audio_ext=(
-            loaded_config.default_audio_format
-            if payload.quality in audioQualities
-            else "webm"
-        ),
+        audio_format=target_format.format_id if target_format else None,
+        bitrate=None,
+        ytdl_params={
+            "outtmpl": os.path.join(
+                tmpdir,
+                f"{sanitize_filename(extracted_info.title)}.%(ext)s",
+            )
+        },
     )
-    target_format = video_formats.get(payload.quality)
-    id_placeholder = ", %(id)s" if loaded_config.append_id_in_filename else ""
+    filepath = Path(processed["requested_downloads"][0]["filepath"])
 
-    ytdl_opts = {
-        "outtmpl": (
-            f"{loaded_config.filename_prefix or ''}"
-            f"{sanitize_filename(extracted_info.title)} "
-            f"(%(format_note)s{id_placeholder}).%(ext)s"
-        )
-    }
+    def cleanup():
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
-    if loaded_config.embed_subtitles and payload.x_lang is not None:
-        ytdl_opts.update({
-            "postprocessors": [
-                {"already_have_subtitle": False, "key": "FFmpegEmbedSubtitle"}
-            ],
-            "writeautomaticsub": True,
-            "writesubtitles": True,
-            "subtitleslangs": [payload.x_lang],
-        })
-
-    kwargs["ytdl_params"] = ytdl_opts
-
-    if payload.quality in audioQualities:
-        assert target_format, (
-            f"The video does not support the audio quality '{payload.quality}'. "
-            "Try other audio qualities like "
-            f"{
-                ', '.join([
-                    quality
-                    for quality in audioQualities
-                    if quality != payload.quality
-                ])
-            }."
-        )
-        processed_info_dict = downloader.ydl_run_audio(
-            extracted_info,
-            audio_format=target_format.format_id,
-            bitrate=payload.bitrate,
-            progress_hooks=progress_hooks,
-            **kwargs,
-        )
-    elif payload.quality in videoQualities:
-        assert target_format, (
-            f"The video does not support the video quality '{payload.quality}'. "
-            f"Try other video qualities like {
-                ', '.join([
-                    quality
-                    for quality in videoQualities
-                    if quality != payload.quality
-                ])
-            }."
-        )
-        processed_info_dict = downloader.ydl_run_video(
-            extracted_info,
-            video_format=target_format.format_id,
-            output_ext="mp4",
-            progress_hooks=progress_hooks,
-            **kwargs,
-        )
-        # TODO: Consider audio_format as well
-    else:
-        # bestaudio | bestvideo | best
-        if payload.bitrate:
-            # audio
-            processed_info_dict = downloader.ydl_run_audio(
-                extracted_info,
-                payload.bitrate,
-                audio_format=payload.quality,
-            )
-        else:
-            processed_info_dict = downloader.ydl_run(
-                extracted_info,
-                video_format=None,
-                audio_format=None,
-                default_format=payload.quality,
-            )
-
-    filepath = Path(processed_info_dict["requested_downloads"][0]["filepath"])
-
-    return models.MediaDownloadResponse(
-        is_success=True,
+    return FileResponse(
+        path=filepath,
         filename=filepath.name,
-        filesize=get_size_string(path.getsize(filepath)),
-        link=get_absolute_link_to_static_file(filepath.name, request),
+        media_type="audio/m4a",
+        background=BackgroundTask(cleanup),
     )
-
-
-# ── Only this handler changed ────────────────────────────────────────────────
-
-
-@router.websocket("/download/ws", name="Process download (websocket)")
-async def download_websocket_handler(websocket: WebSocket):
-    await websocket.accept()
-
-    try:
-        payload_dict: dict = await websocket.receive_json()
-        payload = models.MediaDownloadProcessPayload(**payload_dict)
-
-        def run_download(progress_hooks: list[t.Callable]):
-            return real_download_process(
-                request=websocket,
-                payload=payload,
-                progress_hooks=progress_hooks,
-            )
-
-        queue = await download_manager.subscribe(
-            url=payload.url,
-            quality=payload.quality,
-            run_download_fn=run_download,
-        )
-
-        while True:
-            message = await queue.get()
-            await websocket.send_json(message)
-            if message["status"] in ("completed", "error"):
-                break
-
-    except ValidationError as e:
-        error = CustomWebsocketResponse(
-            status="error", detail=dict(errors=json.loads(e.json()))
-        )
-        await websocket.send_json(error.model_dump())
-
-    except Exception as e:
-        logger.error(f"Websocket error {e}")
-
-    finally:
-        if websocket.client_state == WebSocketState.CONNECTED:
-            await websocket.close()

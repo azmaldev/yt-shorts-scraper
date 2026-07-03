@@ -7,7 +7,7 @@ accessible over http and a web-interface that's accessible securely (https).
 
 1. Host youtube-downloader over http (insecure)
 2. Start this proxy (locally) and point base_url to the address of
- youtube-downloader-api
+ yt-shorts-scraper
 3. Point API-BASE-URL in web-interface to proxy's address.
 
 NOTE: This is only for personal use and its NOT SUITABLE FOR PRODUCTION DEPLOYMENT

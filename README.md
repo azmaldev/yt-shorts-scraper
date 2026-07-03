@@ -1,153 +1,181 @@
 <div align="center">
 
-# YouTube Video Downloader API
+# 🎬 YT Shorts Scraper
 
-[![License](https://img.shields.io/static/v1?logo=license&color=Blue&message=Unlicense&label=License)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/Simatwa/youtube-downloader-api?label=Release&logo=github)](https://github.com/Simatwa/youtube-downloader-api/releases)
-[![Release date](https://img.shields.io/github/release-date/Simatwa/youtube-downloader-api?label=Release%20date&logo=github)](https://github.com/Simatwa/youtube-downloader-api/releases)
-[![Total hits](https://hits.sh/github.com/Simatwa/youtube-downloader-api.svg?label=Total%20hits)](https://github.com/Simatwa/youtube-downloader-api)
+**Extract metadata, transcripts & audio from YouTube Shorts — instantly.**
+
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.14-blue?logo=python)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.136-009688?logo=fastapi)](https://fastapi.tiangolo.com)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+
 </div>
 
+A lightweight REST API that scrapes rich metadata from YouTube Shorts (videos ≤120s) and provides temporary audio downloads. Built on **FastAPI** with **yt-dlp** under the hood.
 
-A REST API that provides endpoints for searching, extracting metadata, and downloading YouTube videos in **mp4**, **webm**, **m4a**, and **mp3** formats across multiple quality levels. It is built on FastAPI and powered by `yt-dlp` under the hood, making it suitable for both local use and production deployment.
+---
 
-## Prerequisites
+## 📦 What It Scrapes
 
-Before getting started, ensure the following are installed on your system:
+| # | Field | Description | Example |
+|---|-------|-------------|---------|
+| 1 | `id` | YouTube video ID | `LaHO_FJq_b8` |
+| 2 | `title` | Video title | `Joe Rogan Can't Believe What Mike Tyson Eats` |
+| 3 | `channel` | Channel name | `Worthy Rogan` |
+| 4 | `duration_string` | Duration in seconds | `17` |
+| 5 | `thumbnail` | Thumbnail image URL | `https://i.ytimg.com/vi/.../sd2.jpg` |
+| 6 | `like_count` | Number of likes | `62785` |
+| 7 | `views_count` | Number of views | `1994503` |
+| 8 | `hashtags` | Hashtags from description | `["#shorts"]` |
+| 9 | `transcript` | Auto-generated English transcript | `"Mike Tyson's mind has switched..."` |
 
-- [Python 3.10 or higher](https://python.org) - the runtime environment
-- [Git](https://git-scm.com/) - for cloning the repository
+---
 
-## Installation Guide
+## 🚀 Quick Start
 
-### Step 1: Clone the Repository
+### Prerequisites
 
-Clone the project and navigate into the project directory:
+- **Python 3.14+**
+- **Git**
+
+### Setup
 
 ```sh
-git clone https://github.com/Simatwa/youtube-downloader-api.git
-cd youtube-downloader-api
-```
-
-### Step 2: Set Up a Virtual Environment
-
-Create and activate a virtual environment, then install all dependencies:
-
-```sh
+git clone https://github.com/azmaldev/yt-shorts-scraper.git
+cd yt-shorts-scraper
 pip install uv
 uv venv
-source .venv/bin/activate
+source .venv/bin/activate    # Linux/macOS
+.venv\Scripts\activate       # Windows
 uv sync
 ```
 
-> [!TIP]
-> It is strongly recommended to keep `yt-dlp` updated regularly to avoid breakage caused by YouTube-side changes:
-> ```sh
-> uv pip install -U yt-dlp
-> ```
-
-### Step 3: Configure Settings (Optional)
-
-By default, the app loads configuration from [`config.yml`](./config.yml). Review and adjust the values to suit your environment before starting the server.
-
-For a quick production-ready setup, a pre-tuned [`production.yml`](./production.yml) is included. Simply rename it to `config.yml` to use it:
+### Run the server
 
 ```sh
-mv production.yml config.yml
+uv run fastapi dev app
 ```
 
-> [!WARNING]
-> Some settings in `config.yml` are critical to the app's operation. Incorrect values can break functionality entirely. Make changes only when you understand their effect.
+Open **http://localhost:8000/api/docs** for the interactive Swagger UI.
 
-### Step 4: Start the Server
+---
 
-Launch the development server with:
+## 📡 API Endpoints
+
+### `GET /api/metadata`
+
+Returns all scraped metadata for a YouTube Shorts video.
+
+**Input:** `url` — YouTube video URL or ID
 
 ```sh
-uv run python -m app run
+curl "http://localhost:8000/api/metadata?url=https://youtube.com/shorts/LaHO_FJq_b8"
 ```
 
-Alternatively, use FastAPI's CLI for more control:
+**Output:**
+
+```json
+{
+  "id": "LaHO_FJq_b8",
+  "title": "Joe Rogan Can't Believe What Mike Tyson Eats",
+  "channel": "Worthy Rogan",
+  "duration_string": "17",
+  "thumbnail": "https://i.ytimg.com/vi/LaHO_FJq_b8/sd2.jpg",
+  "like_count": 62785,
+  "views_count": 1994503,
+  "hashtags": [],
+  "transcript": "Mike Tyson's mind has switched over into war..."
+}
+```
+
+### `POST /api/download`
+
+Downloads the audio track as a temporary m4a file.
+
+**Input:** `url`, `quality` (`low` / `medium` / `high`)
 
 ```sh
-fastapi run app
+curl -X POST "http://localhost:8000/api/download?url=https://youtube.com/shorts/LaHO_FJq_b8&quality=low" -o audio.m4a
 ```
 
-For advanced startup options such as changing the **host** or **port**:
+---
 
-```sh
-uv run fastapi run --help
+## ⚙️ Configuration
+
+Edit [`config.yml`](config.yml) to customize:
+
+| Setting | Description |
+|---------|-------------|
+| `po_token` / `visitorData` | Browser auth tokens (avoids YouTube blocks) |
+| `cookiefile` | Path to Netscape-format cookies file |
+| `proxy` | HTTP/SOCKS proxy for requests |
+| `retries` | Number of retry attempts (default: 3) |
+| `default_extension` | `webm` or `mp4` |
+| `default_audio_format` | `m4a` or `webm` |
+| `geo_bypass` | Bypass geographic restrictions |
+| `quiet` / `verbose` | Logging verbosity |
+
+> 💡 Use `production.yml` as a tuned starting point for deployment.
+
+---
+
+## 🛠 Utility Servers
+
+| Server | Purpose |
+|--------|---------|
+| [`servers/static.py`](servers/static.py) | Serves downloaded media files independently (reduces API load) |
+| [`servers/proxy.py`](servers/proxy.py) | Forwards requests to a non-HTTPS API instance |
+
+---
+
+## 🔧 Troubleshooting
+
+> **YouTube blocks your requests?**
+
+YouTube actively flags requests without proper browser-like authorization.
+
+**Solutions:**
+
+1. **Cookies + PO Token** — Extract from your browser and set in `config.yml`.
+   [Full guide →](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#po-token-guide)
+
+2. **Whitelisted proxy** — Route through an IP that YouTube hasn't flagged.
+
+3. **JS Runtime** — Install `deno` for better extraction:
+   ```sh
+   # Install deno, then yt-dlp will use it automatically
+   ```
+
+---
+
+## 🏗 Project Structure
+
+```
+yt-shorts-scraper/
+├── app/
+│   ├── __init__.py        # FastAPI app entry point
+│   ├── __main__.py        # CLI commands
+│   ├── config.py          # Configuration loader
+│   ├── models.py          # Pydantic models
+│   ├── utils.py           # Helpers (URL parsing, error handling)
+│   ├── v1/
+│   │   ├── routes.py      # API routes (metadata + download)
+│   │   ├── utils.py       # Extraction logic
+│   │   └── models.py      # Response models
+│   └── v2/                # Placeholder
+├── servers/
+│   ├── static.py           # Static file server
+│   └── proxy.py            # HTTPS proxy server
+├── tests/
+│   ├── test_v1.py          # API tests
+│   └── websocket_download.py
+├── config.yml              # Configuration file
+├── production.yml           # Production-ready config
+└── pyproject.toml           # Project metadata & dependencies
 ```
 
-Once running, the API documentation is available at:
+---
 
-- **Swagger UI:** <http://localhost:8000/api/docs>
-- **ReDoc:** <http://localhost:8000/api/redoc>
+## 📄 License
 
-## Serving Frontend Contents
-
-The API can serve a static frontend alongside the backend. To enable this, set the `frontend_dir` key in your [configuration file](./config.yml) to the path of the directory containing your frontend build.
-
-> [!NOTE]
-> The specified frontend directory **must** contain an `index.html` file at its root. Without it, the frontend will not be served correctly. Use `YDA_CONFIG_FILE_PATH` environment variable to declare path to yaml file serving as configuration file.
-
-## Optimizing Server Performance
-
-For production deployments, offloading static file delivery (downloaded audio and video files) to a dedicated static server significantly reduces load on the main API process.
-
-**Setup steps:**
-
-1. Start the included static file server:
-```sh
-   python servers/static.py
-```
-2. Set the `static_server_url` key in `config.yml` to point to the static server's URL.
-
-> [!IMPORTANT]
-> In production, it is recommended to serve static content using [uWSGI](https://uwsgi-docs.readthedocs.io/en/latest/) for better concurrency and stability. The included [`uwsgi.sh`](../uwsgi.sh) script provides a ready-to-use uWSGI configuration to get you started quickly.
-
-## Troubleshooting
-
-### Authorization Issues
-
-YouTube actively flags and blocks requests that lack proper browser-like authorization context. This is a common cause of download failures, especially on fresh deployments or IPs with no prior request history.
-
-**Recommended workarounds:**
-
-1. **Cookies + PO Token** - Extract your browser cookies and a valid `po_token`, then pass them to the app. This is the most reliable method. See the full guide:
-   [How to extract PO Token](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#po-token-guide)
-
-2. **Whitelisted Proxy** - Route requests through a proxy server that YouTube has not flagged.
-
-> [!NOTE]
-> Using a proxy does not guarantee success. YouTube's detection mechanisms can flag proxy IPs as well. The cookie + PO token approach is generally more stable.
-
-## Utility Servers
-
-Two helper servers are included for extending the API's capabilities in production:
-
-| Server | Description |
-|--------|-------------|
-| [Static Server](../servers/static.py) | Serves downloaded media files independently from the main API process, reducing load and improving throughput |
-| [Proxy Server](../servers/proxy.py) | Forwards requests to a non-HTTPS instance of the YouTube Downloader API hosted on a remote server |
-
-## Web Interfaces
-
-The following projects provide ready-to-use web frontends for interacting with the YouTube Downloader API:
-
-| Index | 🎁 Project | ⭐ Stars |
-|-------|-----------|---------|
-| 0 | [y2mate-clone](https://github.com/Simatwa/y2mate-clone) | [![Stars](https://img.shields.io/github/stars/Simatwa/y2mate-clone?style=flat-square&labelColor=343b41)](https://github.com/Simatwa/y2mate-clone/stargazers) |
-
-_Built a frontend that works with this API? Feel free to open a PR and add it to this list._
-
-## Additional Resources
-
-- [How to extract PO Token](https://github.com/yt-dlp/yt-dlp/wiki/Extractors#po-token-guide) - Required reading if you encounter YouTube authorization errors
-- [yt-dlp documentation](https://github.com/yt-dlp/yt-dlp) - The underlying download engine powering this API
-- [uWSGI documentation](https://uwsgi-docs.readthedocs.io/en/latest/) - Recommended for production static file serving
-
-## License
-
-- [x] [The Unlicense](LICENSE)
+[MIT](LICENSE) — do whatever you want with it.

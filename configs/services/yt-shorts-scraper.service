@@ -1,0 +1,14 @@
+[Unit]
+Description=YT Shorts Scraper API
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/azmaldev/yt-shorts-scraper
+Environment=YDA_CONFIG_FILE_PATH=/home/azmaldev/.config.yml
+ExecStart=/home/azmaldev/yt-shorts-scraper/.venv/bin/python -m fastapi run app --port 8088
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

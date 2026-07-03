@@ -4,8 +4,8 @@ import typer
 from fastapi_cli.cli import app as fastapi_app
 
 app = typer.Typer(
-    name="Youtube-Downloader-API",
-    help="Utility commands for Youtube-Downloader-API",
+    name="YT-Shorts-Scraper",
+    help="Utility commands for YT-Shorts-Scraper",
 )
 
 

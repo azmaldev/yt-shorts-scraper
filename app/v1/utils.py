@@ -1,54 +1,48 @@
-"""Utility functions for v1"""
+import json
+import re
 
-from sqlalchemy.exc import IntegrityError
-from sqlmodel import Session, select
+import requests
+import yt_dlp
 from yt_dlp_bonus import YoutubeDLBonus
 from yt_dlp_bonus.models import ExtractedInfo
 
-from app.db import VideoInfo, engine
-from app.utils import get_video_id, utc_now
-
 
 def get_extracted_info(yt: YoutubeDLBonus, url: str) -> ExtractedInfo:
-    """Get url's extracted_info from cache or youtube accordingly"""
-    video_id = get_video_id(url)
-    query = select(VideoInfo).where(VideoInfo.id == video_id)
+    return yt.extract_info_and_form_model(url)
 
-    with Session(bind=engine) as session:
-        cached_extracted_info: VideoInfo = session.exec(query).first()
 
-        if cached_extracted_info:
-            if cached_extracted_info.is_valid:
-                return cached_extracted_info.extracted_info
+def extract_hashtags(extracted_info: ExtractedInfo) -> list[str]:
+    description = extracted_info.description or ""
+    return re.findall(r"#\w+", description)
 
-            else:
-                extracted_info = yt.extract_info_and_form_model(url)
-                cached_extracted_info.info = extracted_info.model_dump_json()
-                cached_extracted_info.updated_on = utc_now()
 
-                try:
-                    session.add(cached_extracted_info)
-                    session.commit()
-
-                except IntegrityError:
-                    # Very common exception
-                    pass
-
-                return extracted_info
-        else:
-            extracted_info = yt.extract_info_and_form_model(url)
-
-            new_video_info = VideoInfo(
-                id=video_id,
-                info=extracted_info.model_dump_json(),
-                updated_on=utc_now(),
-            )
-
-            try:
-                session.add(new_video_info)
-                session.commit()
-
-            except IntegrityError:
-                pass
-
-            return extracted_info
+def extract_transcript(video_id: str) -> str | None:
+    ydl_opts = {"quiet": True, "skip_download": True}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        info = ydl.extract_info(
+            f"https://www.youtube.com/watch?v={video_id}", download=False
+        )
+        captions = info.get("automatic_captions") or {}
+        en_captions = captions.get("en") or []
+        if not en_captions:
+            return None
+        json3_url = None
+        for c in en_captions:
+            if c.get("ext") == "json3":
+                json3_url = c.get("url")
+                break
+        if not json3_url:
+            json3_url = en_captions[0].get("url")
+        if not json3_url:
+            return None
+        resp = requests.get(json3_url, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        events = data.get("events", [])
+        text_parts = []
+        for event in events:
+            segs = event.get("segs", [])
+            for seg in segs:
+                utf8 = seg.get("utf8", "")
+                text_parts.append(utf8)
+        return " ".join(text_parts).strip() or None

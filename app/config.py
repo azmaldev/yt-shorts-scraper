@@ -2,8 +2,6 @@ import os
 import tomllib
 from pathlib import Path
 
-import yaml
-
 from app.models import ConfigModel
 
 PROJECT_DIR = Path(__file__).parent.parent
@@ -14,23 +12,20 @@ if ENV_CONFIG_FILE_PATH:
 else:
     CONFIG_FILE_PATH = PROJECT_DIR / "config.yml"
 
-
 assert CONFIG_FILE_PATH.exists(), (
     f"Invalid config file path {CONFIG_FILE_PATH.absolute()!r}. Does not exist"
 )
 
+import yaml
 config_values = yaml.safe_load(open(CONFIG_FILE_PATH))
 
 loaded_config = ConfigModel(**config_values)
-"""Loaded from .env file"""
 
-WORKING_DIR = Path(loaded_config.working_directory)
-
-DOWNLOAD_DIR = WORKING_DIR / "downloads"
-
-TEMP_DIR = WORKING_DIR / "temps"
-
+DOWNLOAD_DIR = (
+    Path(loaded_config.working_directory)
+    if Path(loaded_config.working_directory).is_absolute()
+    else PROJECT_DIR / loaded_config.working_directory
+)
 
 PYPROJECT_DOT_TOML_PATH = PROJECT_DIR / "pyproject.toml"
-
 pyproject_dot_toml_details = tomllib.load(open(PYPROJECT_DOT_TOML_PATH, "rb"))

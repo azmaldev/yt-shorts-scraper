@@ -6,8 +6,8 @@ Contains configurations for the api
 
 Contains configurations for uwsgi server.
 
-# Youtube-Downloader API service
+# YT Shorts Scraper service
 
 ```sh
-cp services/youtube-downloader-api.service ~/.config/systemd/user/
+cp services/yt-shorts-scraper.service ~/.config/systemd/user/
 ```
